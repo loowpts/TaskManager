@@ -1,5 +1,5 @@
 from django.db import models
-
+from django.core.exceptions import ValidationError
 
 class TaskTag(models.Model):
     name = models.CharField(max_length=50, unique=True)
@@ -60,6 +60,9 @@ class Task(models.Model):
     def __str__(self):
         return f'{self.title} ({self.get_status_display()})'
 
+    def clean(self):
+        if not self.assignee:
+            raise ValidationError({'assignee': 'Assignee обязателен'})
 
 class TaskComment(models.Model):
     task = models.ForeignKey('tasks.Task', on_delete=models.CASCADE, related_name='comments')
