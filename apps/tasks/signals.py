@@ -4,7 +4,6 @@ from django.utils import timezone
 from django.db import models
 from .models import Task, TaskHistory, TaskComment, TimeEntry
 
-
 @receiver(pre_save, sender=Task)
 def track_task_changes(sender, instance, **kwargs):
     """

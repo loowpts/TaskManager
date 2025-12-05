@@ -3,7 +3,7 @@ from django.apps import AppConfig
 
 class TasksConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
-    name = "tasks"
+    name = "apps.tasks"
     
     def ready(self) -> None:
-        import tasks.signals
+        import apps.tasks.signals
