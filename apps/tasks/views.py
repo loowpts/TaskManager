@@ -1,157 +1,247 @@
-import json
 import logging
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
+from django.shortcuts import redirect
+from django.conf import settings
+from django.template.response import TemplateResponse
 from django.views.decorators.http import require_http_methods
+from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+from django.contrib.auth.decorators import login_required
 from django.db.models import Q, Count, Prefetch
 from django.utils import timezone
 from datetime import datetime
 
 from .models import Task, TaskTag
-from .permissions import can_delete_task, can_edit_task, can_view_task
-from .decorators import login_required_json, require_http_methods_json
-from .utils import (
-    serialize_task_list,
-    serialize_task_detail,
-    paginate_queryset, 
-    json_response
-)
-from .permissions import is_manager
+from .forms import TaskCreateForm, TaskUpdateForm
+
+User = settings.AUTH_USER_MODEL
 
 logger = logging.getLogger(__name__)
 
-
-@login_required_json
-@require_http_methods(['GET'])
+@login_required
 def task_list(request):
-    user = request.user
-    
-    # Базовый queryset
-    if is_manager(user):
-        tasks = Task.objects.all()
-    else:
-        # Обычный пользователь видит только свои задачи
-        tasks = Task.objects.filter(
-            Q(assignee=user) | Q(creator=user) | Q(watchers__user=user)
-        ).distinct()
-    
-    tasks = tasks.select_related('creator', 'assignee', 'parent_task')
-    tasks = tasks.prefetch_related('tags', 'subtasks', 'comments', 'attachments')
-    
-    status = request.GET.get('status')
-    if status:
-        tasks = tasks.filter(status=status)
-    
-    priority = request.GET.get('priority')
-    if priority:
-        tasks = tasks.filter(priority=priority)
-        
-    assignee = request.GET.get('assignee')
-    if assignee:
+    try:
+        user = request.user
+
+        if hasattr(user, 'is_manager') and user.is_manager():
+            tasks = Task.objects.all()
+        else:
+            # Показываем задачи, где пользователь - создатель, исполнитель или наблюдатель
+            tasks = Task.objects.filter(
+                Q(assignee=user) | Q(creator=user) | Q(watchers__user=user)
+            ).distinct()
+
+        # Оптимизация запросов
+        tasks = tasks.select_related('creator', 'assignee', 'parent_task')
+        tasks = tasks.prefetch_related('tags', 'subtasks', 'comments', 'attachments')
+
+        status = request.GET.get('status')
+        if status:
+            tasks = tasks.filter(status=status)
+
+        priority = request.GET.get('priority')
+        if priority:
+            tasks = tasks.filter(priority=priority)
+
+        assignee = request.GET.get('assignee')
+        if assignee:
+            try:
+                tasks = tasks.filter(assignee_id=int(assignee))
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid assignee ID: {assignee}")
+
+        # Фильтрация по создателю
+        creator = request.GET.get('creator')
+        if creator:
+            try:
+                tasks = tasks.filter(creator_id=int(creator))
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid creator ID: {creator}")
+
+        # Фильтрация по дедлайну (от)
+        deadline_from = request.GET.get('deadline_from')
+        if deadline_from:
+            try:
+                deadline_from = datetime.strptime(deadline_from, '%Y-%m-%d')
+                tasks = tasks.filter(deadline__gte=deadline_from)
+            except ValueError:
+                logger.warning(f"Invalid deadline_from format: {deadline_from}")
+                
+        # Фильтрация по дедлайну (до)
+        deadline_to = request.GET.get('deadline_to')
+        if deadline_to:
+            try:
+                deadline_to = datetime.strptime(deadline_to, '%Y-%m-%d')
+                tasks = tasks.filter(deadline__lte=deadline_to)
+            except ValueError:
+                logger.warning(f"Invalid deadline_to format: {deadline_to}")
+
+        search = request.GET.get('search')
+        if search:
+            if len(search) > 200:
+                logger.warning(f"Search query too long: {len(search)} characters")
+                search = search[:200]
+            tasks = tasks.filter(
+                Q(title__icontains=search) | Q(description__icontains=search)
+            )
+
+        tags = request.GET.get('tags')
+        if tags:
+            try:
+                tag_ids = [int(tid) for tid in tags.split(',') if tid.strip().isdigit()]
+                if tag_ids:
+                    tasks = tasks.filter(tags__id__in=tag_ids)
+            except (ValueError, AttributeError):
+                logger.warning(f"Invalid tags format: {tags}")
+
+        ordering = request.GET.get('ordering', '-created_at')
+        allowed_ordering = [
+            'created_at', '-created_at', 'deadline', '-deadline',
+            'priority', '-priority', 'status', '-status',
+            'title', '-title'
+        ]
+
+        if ordering in allowed_ordering:
+            tasks = tasks.order_by(ordering)
+        else:
+            tasks = tasks.order_by('-created_at')
+
         try:
-            tasks = tasks.filter(assignee_id=int(assignee))
+            per_page = int(request.GET.get('per_page', 20))
+            per_page = min(max(per_page, 1), 100)
         except (ValueError, TypeError):
-            logger.warning(f"Invalid assignee ID: {assignee}")
-    
-    creator = request.GET.get('creator')
-    if creator:
+            per_page = 20
+
+        page = request.GET.get('page', 1)
+        paginator = Paginator(tasks, per_page)
+
         try:
-            tasks = tasks.filter(creator_id=int(creator))
+            tasks_page = paginator.page(page)
+        except PageNotAnInteger:
+            tasks_page = paginator.page(1)
+        except EmptyPage:
+            tasks_page = paginator.page(paginator.num_pages)
+
+        context = {
+            'tasks': tasks_page,
+            'page_obj': tasks_page,
+            'total_count': paginator.count,
+            'error': None
+        }
+
+        return TemplateResponse(request, 'tasks/task_list.html', context)
+
+    except Exception as e:
+        logger.error(f"Error in task_list: {str(e)}", exc_info=True)
+        context = {
+            'tasks': [],
+            'error': 'Произошла ошибка при загрузке задач. Попробуйте позже.',
+            'total_count': 0
+        }
+        return TemplateResponse(request, 'tasks/task_list.html', context, status=500)
+
+@login_required
+def task_detail(request, task_id):
+    try:
+        try:
+            task_id = int(task_id)
         except (ValueError, TypeError):
-            logger.warning(f"Invalid creator ID: {creator}")
+            logger.warning(f"Invalid task ID format: {task_id}")
+            context = {
+                'error': 'Недопустимый формат идентификатора задачи.',
+                'task': None
+            }
+            return TemplateResponse(request, 'tasks/task_detail.html', context, status=400)
+
+        try:
+            task = Task.objects.select_related(
+                'creator', 'assignee', 'parent_task'
+            ).prefetch_related(
+                'tags', 'comments', 'attachments', 'checklist',
+                'watchers__user',
+                'time_entries', 'time_entries__user',
+                'subtasks', 'subtasks__tags'
+            ).get(id=task_id)
+        except Task.DoesNotExist:
+            logger.warning(f'Task not found: {task_id}')
+            context = {
+                'error': 'Задача не найдена.',
+                'task': None
+            }
+            return TemplateResponse(request, 'tasks/task_detail.html', context, status=404)
         
-    deadline_from = request.GET.get('deadline_from')
-    if deadline_from:
-        try:
-            deadline_from = datetime.strptime(deadline_from, '%Y-%m-%d')
-            tasks = tasks.filter(deadline__gte=deadline_from)
-        except ValueError:
-            logger.warning(f"Invalid deadline_from format: {deadline_from}")
-    
-    deadline_to = request.GET.get('deadline_to')
-    if deadline_to:
-        try:
-            deadline_to = datetime.strptime(deadline_to, '%Y-%m-%d')
-            tasks = tasks.filter(deadline__lte=deadline_to)
-        except ValueError:
-            logger.warning(f"Invalid deadline_to format: {deadline_to}")
-    
-    search = request.GET.get('search')
-    if search:
-        tasks = tasks.filter(
-            Q(title__icontains=search) | Q(description__icontains=search)
+        user = request.user
+        
+        has_access = (
+            task.assignee == user or
+            task.creator == user or
+            (hasattr(user, 'is_manager') and user.is_manager()) or
+            task.watchers.filter(user=user).exists()
         )
         
-    tags = request.GET.get('tags')
-    if tags:
-        try:
-            tag_ids = [int(tid) for tid in tags.split(',') if tid.strip().isdigit()]
-            if tag_ids:
-                tasks = tasks.filter(tags__id__in=tag_ids)
-        except (ValueError, AttributeError):
-            logger.warning(f"Invalid tags format: {tags}")
-    
-    ordering = request.GET.get('ordering', '-created_at')
-    allowed_ordering = [
-        'created_at', '-created_at', 'deadline', '-deadline',
-        'priority', '-priority', 'status', '-status',
-        'title', '-title'
-    ]
-    
-    if ordering in allowed_ordering:
-        tasks = tasks.order_by(ordering)
-    else:
-        tasks = tasks.order_by('-created_at')
+        if not has_access:
+            logger.warning(f"User {user.id} attempted to access task {task_id} without permission.")
+            context = {
+                'error': 'У вас нет прав для просмотра этой задачи.',
+                'task': None
+            }
+            return TemplateResponse(request, 'tasks/task_detail.html', context, status=403)
         
-    try:
-        per_page = int(request.GET.get('per_page', 20))
-        per_page = min(max(per_page, 1), 100)
-    except (ValueError, TypeError):
-        per_page = 20
+        context = {
+            'task': task,
+            'can_edit': task.creator == user or (hasattr(user, 'is_manager') and user.is_manager()),
+            'can_delete': task.creator == user or (hasattr(user, 'is_manager') and user.is_manager()),
+            'is_watcher': task.watchers.filter(user=user).exists(),
+            'error': None
+        }
+        
+        return TemplateResponse(request, 'tasks/task_detail.html', context)
     
-    paginated_tasks, meta = paginate_queryset(tasks, request, per_page=per_page)
+    except Exception as e:
+        logger.error(f"Error retrieving task {task_id}: {e}")
+        context = {
+            'error': 'Произошла ошибка при загрузке задачи.',
+            'task': None
+        }
+        return TemplateResponse(request, 'tasks/task_detail.html', context, status=500)
     
-    serialized_tasks = [serialize_task_list(task) for task in paginated_tasks]
+@login_required
+@require_http_methods(["GET", "POST"])
+def task_create(request, user_id):
+    if request.method == 'GET':
+        form = TaskCreateForm()
+        context = {
+            'form': form,
+            'title': 'Создать задачу'
+        }
+        return TemplateResponse(request, 'tasks/task_create.html', context)
     
-    return JsonResponse({
-        'success': True,
-        'data': serialized_tasks,
-        'meta': meta,
-        'message': 'Tasks retrieved successfully',
-    }, status=200)
-
-@login_required_json
-@require_http_methods(['GET'])
-def task_detail(request, task_id):
-    # Оптимизация запросов - делаем ДО получения объекта
-    task = Task.objects.select_related(
-        'creator', 'assignee', 'parent_task'
-    ).prefetch_related(
-        'tags', 'comments', 'attachments', 'checklist', 
-        'watchers', 'watchers__user',
-        'time_entries', 'time_entries__user',
-        'subtasks', 'subtasks__tags'
-    ).filter(id=task_id).first()
+    form = TaskCreateForm(request.POST)
+    if not form.is_valid():
+        logger.warning(f'Task creation form invalid: {form.errors}')
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({
+                'error': 'Некорректные данные формы.',
+                'details': form.errors
+            }, status=400)
+        else:
+            context = {
+                'form': form,
+                'title': 'Создать задачу'
+            }
+            return TemplateResponse(request, 'tasks/task_form.html', context, status=400)
+        
+    task = form.save(commit=False)
+    task.save()
     
-    # Проверка существования
-    if not task:
-        return JsonResponse({
-            'success': False,
-            'message': 'Task not found',
-        }, status=404)
+    form.save_m2m()
     
-    if not can_view_task(request.user, task):
-        return JsonResponse({
-            'success': False,
-            'message': 'Permission denied',
-        }, status=403)
+    logger.info(f'Task {task.id} created by user {request.user.id}')
     
-    # Сериализация
-    data = serialize_task_detail(task)
-    
-    return JsonResponse({
-        'success': True,
-        'data': data,
-        'message': 'Task retrieved successfully',
-    }, status=200)
-    
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return TemplateResponse(request, 'tasks/partials/task_item.html', {
+            'task': task,
+            'message': 'Задача успешно создана.'
+        })
+    else:
+        return redirect('task_detail', task_id=task.id)
