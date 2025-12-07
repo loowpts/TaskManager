@@ -84,7 +84,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     
     @property
     def full_name(self):
-        return (f'{self.first_name} {self.last_name}').strip()
+        full_name = f'{self.first_name} {self.last_name}'.strip()
+        return full_name if full_name else self.email
+
+    def is_manager(self):
+        return self.is_supervisor or self.is_superuser
 
 
 class UserProfile(models.Model):

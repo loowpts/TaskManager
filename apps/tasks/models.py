@@ -1,5 +1,6 @@
 from django.db import models
 from django.core.exceptions import ValidationError
+import os
 
 class TaskTag(models.Model):
     name = models.CharField(max_length=50, unique=True)
@@ -33,7 +34,14 @@ class Task(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     creator = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name='created_tasks')
-    assignee = models.ForeignKey('users.User', on_delete=models.SET_NULL, related_name='assigned_tasks', null=True, blank=True)  # SET_NULL лучше
+    assignee = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        related_name='assigned_tasks',
+        null=True,
+        blank=False,
+        help_text='Исполнитель задачи (обязательно)'
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_CHOICES.NEW)
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default=PRIORITY_CHOICES.LOW)
     deadline = models.DateTimeField(blank=True, null=True)
@@ -61,8 +69,24 @@ class Task(models.Model):
         return f'{self.title} ({self.get_status_display()})'
 
     def clean(self):
-        if not self.assignee:
-            raise ValidationError({'assignee': 'Assignee обязателен'})
+        if self.parent_task:
+            current = self.parent_task
+            visited = set()
+
+            while current:
+                if current.pk == self.pk:
+                    raise ValidationError({
+                        'parent_task': 'Обнаружен цикл в родительских задачах.'
+                    })
+
+                if current.pk in visited:
+                    raise ValidationError({
+                        'parent_task': 'Обнаружен цикл в родительских задачах.'
+                    })
+
+                visited.add(current.pk)
+                current = current.parent_task
+        
 
 class TaskComment(models.Model):
     task = models.ForeignKey('tasks.Task', on_delete=models.CASCADE, related_name='comments')
@@ -98,7 +122,8 @@ class TaskAttachment(models.Model):
     
     def get_file_extension(self):
         """Получить расширение файла"""
-        return self.file_name.split('.')[-1].lower()
+        _, extension = os.path.splitext(self.file_name)
+        return extension.lower().lstrip('.')
 
  
 class TaskHistory(models.Model):
