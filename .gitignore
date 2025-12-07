@@ -75,3 +75,4 @@ pip-delete-this-directory.txt
 .tox/
 notes/*
 docs/
+templates/
