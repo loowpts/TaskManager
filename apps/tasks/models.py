@@ -87,7 +87,6 @@ class Task(models.Model):
                 visited.add(current.pk)
                 current = current.parent_task
         
-
 class TaskComment(models.Model):
     task = models.ForeignKey('tasks.Task', on_delete=models.CASCADE, related_name='comments')
     author = models.ForeignKey('users.User', on_delete=models.CASCADE)
@@ -103,7 +102,6 @@ class TaskComment(models.Model):
     
     def __str__(self):
         return f'Comment by {self.author} on {self.task}'
-
 
 class TaskAttachment(models.Model):
     task = models.ForeignKey('tasks.Task', on_delete=models.CASCADE, related_name='attachments')
@@ -142,7 +140,6 @@ class TaskHistory(models.Model):
     def __str__(self):
         return f'{self.task} - {self.field} changed by {self.changed_by}'
 
-
 class TaskChecklist(models.Model):
     task = models.ForeignKey('tasks.Task', on_delete=models.CASCADE, related_name='checklist')
     item_text = models.CharField(max_length=500)
@@ -160,7 +157,6 @@ class TaskChecklist(models.Model):
         status = '✓' if self.is_completed else '○'
         return f'{status} {self.item_text}'
 
-
 class TaskWatcher(models.Model):
     """Наблюдатели за задачей"""
     task = models.ForeignKey('tasks.Task', on_delete=models.CASCADE, related_name='watchers')
@@ -174,7 +170,6 @@ class TaskWatcher(models.Model):
     
     def __str__(self):
         return f'{self.user} watching {self.task}'
-
 
 class TimeEntry(models.Model):
     """Учет затраченного времени"""
