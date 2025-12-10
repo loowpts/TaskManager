@@ -10,6 +10,8 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Q, Count, Prefetch
 from django.utils import timezone
 from datetime import datetime
+from django.contrib import messages
+
 
 from .models import Task, TaskTag
 from .forms import TaskCreateForm, TaskUpdateForm
@@ -245,3 +247,97 @@ def task_create(request, user_id):
         })
     else:
         return redirect('task_detail', task_id=task.id)
+
+
+@login_required
+@require_http_methods(['GET', 'POST'])
+def task_update(request, task_id):
+    
+    task = get_object_or_404(Task, task_id)
+    
+    if task.creator != request.user and not (hasattr(request.user, 'is_manager') and request.user.is_manager()):
+        logger.warning(f'User {request.user.id} unauthorized to update task {task_id}')
+
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({
+                'error': 'У вас нет прав для редактирования этой задачи.'
+            }, status=403)
+        else:
+            context ={
+                'error': 'У вас нет прав для редактирования этой задачи',
+                'task': task
+            }
+            return TemplateResponse(request, 'task/task_detail.html', context, status=403)
+    
+    if request.method == 'GET':
+        form = TaskUpdateForm(instance=task)
+        context = {
+            'form': form,
+            'task': task,
+            'title': f'Редактировать задачу {task.title}'
+        }
+        return TemplateResponse(request, 'task/task_form.html', context)
+    
+    form = TaskUpdateForm(request.POST, instance=task)
+    
+    if not form.is_valid():
+        logger.warning(f'Task update form invalid for task {task_id}: {form.errors}')
+
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({
+                'error': 'Некорректные данные формы.',
+                'form': form.errors
+            }, status=400)
+        else:
+            context = {
+                'form': form,
+                'task': task,
+                'title': f'Редактировать задачу {task.title}'
+            }
+            return TemplateResponse(request, 'task/task_form.html', context, status=400)
+        
+    task._current_user = request.user
+    task = form.save()
+    
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return TemplateResponse(request, 'tasks/partials/task_item.html', {
+            'task': task,
+            'message': 'Задача успешно обновлена.'
+        })
+    else:
+        return redirect('task_detail', task_id=task.id)
+    
+@login_required
+@require_http_methods(['DELETE'])
+def task_delete(request, task_id):
+    
+    task = get_object_or_404(Task, task_id)
+    
+    if task.creator != request.user and not (hasattr(request.user, 'is_manager') and request.user.is_manager()):
+        logger.warning(f'User {request.user.id} unauthorized to delete task {task_id}')
+
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({
+                'error': 'У вас нет прав для удаления этой задачи.'
+            }, status=403)
+        else:
+            messages.error(request, 'У вас нет прав для удаления этой задачи.')
+            return redirect('task_detail', task_id=task.id)
+        
+    task_title = task.title
+    task.delete()
+    
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JsonResponse({
+            'success': True,
+            'message': f'Задача "{task_title}" успешно удалена.'
+        })
+    else:
+        messages.success(request, f'Задача "{task_title}" успешно удалена.')
+        return redirect('task_list')
+    
+    
+    
+    
+    
+    
