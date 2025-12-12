@@ -199,7 +199,7 @@ def task_detail(request, task_id):
                 'checklist', 'watchers__user',
                 'time_entries', 'time_entries__user',
                 'subtasks', 'subtasks__tags'
-            )
+            ).get(id=task_id)
         except Task.DoesNotExist:
             logger.warning(f'Task not found: {task_id}')
             context = {
@@ -219,7 +219,7 @@ def task_detail(request, task_id):
         context = {
             'task': task,
             'can_edit': can_edit_task(request.user, task),
-            'can_delete': can_delete_task(request, task),
+            'can_delete': can_delete_task(request.user, task),
             'is_watcher': task.watchers.filter(user=request.user).exists(),
             'error': None
         }
@@ -343,33 +343,40 @@ def task_update(request, task_id):
     return redirect('tasks:task_detail', task_id=task.id)
 
 @login_required
-@require_http_methods(['POST', 'DELETE'])
 def task_delete(request, task_id):
     task = get_object_or_404(Task, id=task_id)
-    
+
     if not can_delete_task(request.user, task):
         logger.warning(f'User {request.user.id} unauthorized to delete task {task_id}')
-        
+
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return JsonResponse({
                 'error': 'У вас нет прав для удаления этой задачи.'
             }, status=403)
-        
+
         messages.error(request, 'У вас нет прав для удаления этой задачи.')
         return redirect('tasks:task_detail', task_id=task.id)
-    
+
+    # Show confirmation form for GET requests
+    if request.method == 'GET':
+        context = {
+            'task': task
+        }
+        return TemplateResponse(request, 'tasks/task_confirm_delete.html', context)
+
+    # Delete on POST
     task_title = task.title
-    
+
     task.delete()
-    
+
     logger.info(f'Task {task_id}: {task_title} deleted by user {request.user.id}')
-    
+
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JsonResponse({
             'success': True,
             'message': f'Задача ({task_title}) успешно удалена.'
         })
-        
+
     messages.success(request, f'Задача ({task_title}) успешно удалена.')
     return redirect('tasks:task_list')
         
