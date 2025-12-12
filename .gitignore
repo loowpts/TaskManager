@@ -76,3 +76,4 @@ pip-delete-this-directory.txt
 notes/*
 docs/
 templates/
+static/
