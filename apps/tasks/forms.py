@@ -4,7 +4,7 @@ from django.utils import timezone
 from datetime import timedelta
 from django.core.exceptions import ValidationError
 
-from .models import Task, TaskComment, TaskChecklist, TimeEntry, TaskAttachment
+from .models import Task, TaskComment, TaskChecklist, TimeEntry, TaskAttachment, STATUS_CHOICES, PRIORITY_CHOICES
 
 
 class TaskCreateForm(forms.ModelForm):
@@ -259,7 +259,7 @@ class TaskChecklistItemForm(forms.ModelForm):
 class TimeEntryForm(forms.ModelForm):
     class Meta:
         model = TimeEntry
-        fields = ['data', 'hours', 'description']
+        fields = ['date', 'hours', 'description']
         widgets = {
             'date': forms.DateInput(attrs={
                 'class': 'form-control',
@@ -366,15 +366,15 @@ class TaskAttachmentForm(forms.ModelForm):
         return instance
     
 class TaskFilterForm(forms.Form):
-    
+
     status = forms.ChoiceField(
-        choices=[('', 'Все')] + list(Task.STATUS_CHOICES.choices),
+        choices=[('', 'Все')] + list(STATUS_CHOICES.choices),
         required=False,
         widget=forms.Select(attrs={'class': 'form-select'})
     )
-    
+
     priority = forms.ChoiceField(
-        choices=[('', 'Все')] + list(Task.PRIORITY_CHOICES.choices),
+        choices=[('', 'Все')] + list(PRIORITY_CHOICES.choices),
         required=False,
         widget=forms.Select(attrs={'class': 'form-select'})
     )

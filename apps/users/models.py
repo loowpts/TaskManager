@@ -28,7 +28,7 @@ class UserManager(BaseUserManager):
         extra_fields.setdefault('is_verified', False)
         extra_fields.setdefault('is_employee', True)
         extra_fields.setdefault('is_supervisor', False)
-        extra_fields.setdefault('is_watсher', False)
+        extra_fields.setdefault('is_watcher', False)
         return self._create_user(email, password, **extra_fields)
     
     def create_superuser(self, email, password, **extra_fields):
@@ -38,7 +38,7 @@ class UserManager(BaseUserManager):
         extra_fields.setdefault('is_verified', True)
         extra_fields.setdefault('is_employee', True)
         extra_fields.setdefault('is_supervisor', False)
-        extra_fields.setdefault('is_watсher', False)
+        extra_fields.setdefault('is_watcher', False)
 
         if extra_fields.get('is_staff') is not True:
             raise ValueError('Superuser must have is_staff=True.')
@@ -64,7 +64,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_verified = models.BooleanField(_('e-mail подтверждён'), default=False)
     is_employee = models.BooleanField(_('сотрудник'), default=True)
     is_supervisor = models.BooleanField(_('руководитель'), default=False)
-    is_watсher = models.BooleanField(_('наблюдатель'), default=False)
+    is_watcher = models.BooleanField(_('наблюдатель'), default=False)
 
     # Метаданные
     date_joined = models.DateTimeField(_('дата регистрации'), default=timezone.now)
@@ -114,12 +114,12 @@ class UserProfile(models.Model):
         
         if self.user.is_superuser:
             roles.append('Admin')
-        elif self.user.is_moderator:
-            roles.append('Moderator')
-        elif self.user.is_watсher:
-            roles.append('Freelancer')
         elif self.user.is_supervisor:
-            roles.append('Seller')
+            roles.append('Supervisor')
+        elif self.user.is_watcher:
+            roles.append('Watcher')
+        elif self.user.is_employee:
+            roles.append('Employee')
             
         return ", ".join(roles) or "User"
     

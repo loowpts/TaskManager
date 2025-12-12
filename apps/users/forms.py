@@ -2,7 +2,7 @@ from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import AuthenticationForm
 from django.core.exceptions import ValidationError
-from .models import User
+from .models import User, UserProfile
 
 class RegisterForm(forms.ModelForm):
     password1 = forms.CharField(
@@ -39,8 +39,24 @@ class RegisterForm(forms.ModelForm):
 
 class ProfileForm(forms.ModelForm):
     class Meta:
-        model = User
-        fields = ("first_name", "last_name")
+        model = UserProfile
+        fields = ("avatar", "bio", "timezone")
+        widgets = {
+            'avatar': forms.FileInput(attrs={
+                'class': 'form-control',
+                'accept': 'image/*'
+            }),
+            'bio': forms.Textarea(attrs={
+                'class': 'form-control',
+                'rows': 4,
+                'maxlength': '1000',
+                'placeholder': 'Расскажите о себе...'
+            }),
+            'timezone': forms.TextInput(attrs={
+                'class': 'form-control',
+                'placeholder': 'Europe/Moscow'
+            })
+        }
 
 class LoginForm(AuthenticationForm):
     username = forms.EmailField(label="E-mail")
